@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# This material is based upon work supported by the Defense Advanced
+# Research Projects Agency under Contract No. N66001-11-C-4017.
+#
+# Copyright 2014 - Raytheon BBN Technologies Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied.  See the License for the specific language governing
+# permissions and limitations under the License.
+
+# Bare-bones script that creates a description of a build environment and
+# prints it to stdout.  The return code indicates whether the script succeeded
+# or failed (it may fail if the current directory is not part of a git clone,
+# or similar reasons).
+#
+# This could be extended to add more fields, or to work with version management
+# systems other than git, but this should be adequate for now.
+
+# print the basics: who built this release, where, and when.
+#
+where_when() {
+    # For the sake of confidentiality, we'll omit
+    # $USER, pwd, and hostname (for now)
+    # printf "builduser: %s\n" $USER
+    # printf "builddir: %s\n" $(/bin/pwd)
+    # printf "hostname: %s\n" $(hostname)
+    printf "buildtime: %s\n" $(TZ=UTC /bin/date "+%Y%m%d-%H%M-%Z")
+}
+
+# print the git branch and current git hashtag of the branch.
+#
+# If the branch has uncommited changes, or other unpreserved state,
+# this procedure will NOT detect or capture that.
+#
+git_manifest() {
+
+    # If we're not even on a branch, then don't try to do anything with git.
+
+    branches=$(git branch 2> /dev/null)
+    res=$?
+    if [ $res != 0 ]; then
+	return 1
+    fi
+
+    branch=$(echo "${branches}" | grep '^*' | awk '{print $2}')
+    hashtag=$(git branch --no-abbrev -v | grep '^*' | awk '{print $3}')
+
+    printf "git-branch: %s\n" "${branch}"
+    printf "git-commit: %s\n" "${hashtag}"
+    return 0
+}
+
+echo "platform:" $(lsb_release -ds | sed -e 's/ /_/g') $(uname -r)
+where_when
+git_manifest
+exit $?

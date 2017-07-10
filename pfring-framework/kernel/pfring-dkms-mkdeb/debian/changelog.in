@@ -1,0 +1,5 @@
+DEBIAN_PACKAGE-dkms (MODULE_VERSION) stable; urgency=low
+
+  * GIT info: @GIT_BRANCH@:@GIT_HASH@
+
+ -- Dynamic Kernel Modules Support Team <pkg-dkms-maint@lists.alioth.debian.org>  DATE_STAMP

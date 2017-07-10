@@ -1,0 +1,62 @@
+#!/usr/bin/make -f
+
+# Uncomment this to turn on verbose mode.
+export DH_VERBOSE=1
+
+#
+# debian/compat
+# We should use at least comparibily version 5
+# but this requires the whole building process
+# to be remade and this is something we leave
+# to when we will have more time
+# http://www.tin.org/bin/man.cgi?section=7&topic=debhelper
+#
+
+
+package=pfring
+
+build: build-stamp
+build-stamp:
+	dh_testdir
+
+clean:
+	dh_testdir
+	dh_testroot
+	dh_prep
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+	dh_installinit
+	dh_installman
+#	dh_installdebconf -n
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+#	dh_makeshlibs
+	dh_installdeb
+# Install sources
+	mkdir -p ./debian/pfring/
+	cp -r ./debian/usr  ../etc ./debian/pfring/
+	-find ./debian/pfring -name "\.svn" -type d -exec /bin/rm -rf {} ';'
+	-find ./debian/pfring -name "*~" -type d -exec /bin/rm -rf {} ';'
+	rm -rf ./debian/pfring/etc/init
+	#rm -rf ./debian/pfring/etc/init.d/pf_ring
+#	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-arch
+.PHONY: build clean binary-arch binary install
+

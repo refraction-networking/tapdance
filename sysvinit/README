@@ -1,0 +1,28 @@
+These scripts will help running TapDance in production environments.
+(Probably complicates logging too much in dev environments to warrant using it,
+but I include a dev example (curveball) anyway).
+
+
+To install, simply run `./install.sh` as root. This will install three sysvinit
+files:
+    -zbalance
+    -tapdance
+    -gobbler
+
+and will copy a $(hostname)-specific config into (newly created) /etc/tapdance/
+
+
+To run, simply:
+
+    `sudo service zbalance start`
+    `sudo service tapdance start`
+    `sudo service gobbler start`
+
+These will log to
+    /var/log/tapdance/zbalance/
+    /var/log/tapdance/
+    /var/log/tapdance/gobbler/
+
+respectively. You can see output with
+    `tail -F /var/log/tapdance/current`
+

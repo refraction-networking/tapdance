@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Look at the last WINDOW of records from the squid log,
+# and figure out how many connections are succeeding and
+# failing.
+#
+# NOTE: based on the current format and output.  If there's
+# some other sort of message that squid is going to print,
+# this is going to get messed up.
+#
+# TODO: doesn't send anything to the dashboard yet
+
+# The window is the length of time, in seconds, that we want to
+# aggregate over
+WINDOW=60
+
+NOW=$(date +%s)
+AGO=$((NOW - WINDOW))
+
+eval $(sudo cat /var/log/squid/access.log \
+        | awk "{ if (\$1 > $AGO && \$1 < $NOW) print \$4}" \
+        | sort | uniq -c \
+        | sed -e 's/\/.*$//' \
+        | awk '{print $2, $1}' | sed -e 's/^ *//' -e 's/ /=/')
+
+if [ $? -ne 0 ]; then
+    echo "$0: failed"
+    exit 1
+fi
+
+TOTAL=$((TAG_NONE + TAG_MISS + TCP_TUNNEL))
+FAILED=$((TAG_NONE + TAG_MISS))
+
+HOST=$(hostname)
+PREFIX="tapdance.squid.$HOST"
+NOWT=$(echo $NOW | sed -e 's/\..*$//')
+
+echo "$PREFIX.total.count $TOTAL $NOWT"
+echo "$PREFIX.failed.count $FAILED $NOWT"
+
+exit 0
+
+# TODO: send the info to the dashboard
+#
+echo "$PREFIX.total.count $TOTAL $NOWT" | openssl s_client -connect REDACTED.edu:443
+echo "$PREFIX.failed.count $FAILED $NOWT" | openssl s_client -connect REDACTED.edu:443
+
+exit 0

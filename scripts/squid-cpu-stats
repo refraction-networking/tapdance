@@ -1,0 +1,36 @@
+#!/bin/bash
+
+PROCNAME="squid-1"
+
+INTERVAL=10
+
+HOST=$(hostname)
+PREFIX="tapdance.squid.$HOST"
+
+while [ true ]; do
+    NOW=$(date +%s)
+    NOWT=$(echo $NOW | sed -e 's/\..*$//')
+
+    S300_PCPU=$(/bin/echo -e 'GET cache_object://localhost/info  HTTP/1.0\r\n\r\n' \
+            | nc -s 127.0.0.2 127.0.0.1 1234 -q 1 \
+            | grep 'CPU Usage, 5 minute avg:' \
+            | awk '{print $6}' | sed -e 's/%//')
+
+    SQUID_PID=$(/usr/bin/pgrep -f "$PROCNAME")
+    INSTANT_PCPU=$(/usr/bin/top -b -n 1 -p $SQUID_PID -o %CPU | tail -1 | awk '{print $9}')
+
+    echo instant $NOWT "($INSTANT_PCPU)"
+    echo s300 $NOWT "($S300_PCPU)"
+
+    echo "$PREFIX.pcpu.instant $INSTANT_PCPU $NOWT"
+    echo "$PREFIX.pcpu.s300 $S300_PCPU $NOWT"
+
+    # TODO: send the info to the dashboard
+    #
+    # echo "$PREFIX.pcpu.instant $TOTAL $NOWT" | openssl s_client -connect REDACTED.edu:443
+    # echo "$PREFIX.pcpu.s300 $FAILED $NOWT" | openssl s_client -connect REDACTED.edu:443
+
+    /bin/sleep "$INTERVAL"
+done
+
+exit 0

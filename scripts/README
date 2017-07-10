@@ -1,0 +1,48 @@
+
+Scripts to help automate building, installing, and running TapDance
+
+To build the station, run tapdance-prereqs.sh and then
+tapdance-build.sh.
+
+To build the station, run tapdance-client-prereqs.sh and then
+tapdance-client-build.sh.
+
+Contents of this directory:
+
+  tapdance-prereqs.sh:
+
+    Installs the prerequisites needed to build and run TapDance
+    station (utilities like the rust compiler, libraries like openssl,
+    etc).
+
+  tapdance-build.sh:
+
+    Builds the TapDance station.
+
+  tapdance-client-prereqs.sh
+
+    Installs the prerequisites needed to build and run the TapDance
+    Golang version of the TapDance client.
+
+  tapdance-client-build.sh
+
+    Builds the Golang TapDance client.
+
+  source-cache/
+
+    A directory containing a cached copy of the specific versions of
+    libraries and utilities used by the prereqs scripts.
+
+  describe-build
+
+    A utility for building a description of a build (the git commit,
+    etc)
+
+  util.sh
+
+    Utility functions used by the scripts.
+
+  tapdance-build-notes.txt
+
+    Notes (for internal use).
+

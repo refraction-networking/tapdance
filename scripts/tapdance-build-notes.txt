@@ -1,0 +1,199 @@
+VirtualBox 5.0.30
+Ubuntu 16.04
+
+Grab tapdance sources from decoy routing repository on gitlab.
+
+	git clone git@gitlab.decoyrouting.com:decoy/tapdance
+
+As initially directed, start with instructions in tapdance/README.md. But
+also based on a discussion with the tapdance folks and other readme files
+included in the repository.
+
+1. Build/install prereqs.
+
+	sudo apt-get install build-essential bison flex
+	sudo apt-get install linux-headers-$(uname -r)
+	sudo apt-get install libevent-dev libnuma-dev
+	sudo apt-get install libargtable2-dev
+	sudo apt-get install lunzip
+	sudo apt-get install libpcap-dev
+        sudo apt-get install autotools-dev automake libtool
+
+2. Build/install cargo/rust
+
+	wget https://static.rust-lang.org/dist/rust-1.11.0-x86_64-unknown-linux-gnu.tar.gz
+	tar zxf rust-1.11.0-x86_64-unkown-linux-gnu.tar.gz
+	cd rust-1.11.0-x86_64-unknown-linux-gnu
+	sudo ./install.sh
+
+3. Build tapdance-rust-logic
+
+	cd tapdance/tapdance-rust-logic
+	cargo build [--release]  (per tapdance/README.md)
+
+	* NOTE: Although not clearly stated in the README.md file, the use
+          of the '--release' flag is eventually required, i.e., 
+
+		cargo build --release
+
+	  It results in the proper directory structure (target/release/)
+          required later by the pfring-framework make scripts.
+
+4. Build/install GMP
+
+	wget https://gmplib.org/download/gmp/gmp-6.1.1.tar.lz
+	tar xf gmp-6.1.1.tar.lz
+	cd gmp-6.1.1
+	./configure
+	make
+	make check
+	sudo make install
+
+5. Build/install Openssl
+
+	wget https://www.openssl.org/source/openssl-1.0.2j.tar.gz
+	tar zxf openssl-1.0.2j.tar.gz
+	cd openssl-1.0.2j
+	./config --shared --prefix=/usr/local --openssldir=/usr/local/openssl
+	make
+	make test
+	make install
+
+6. Build/install libevent libraries
+
+	Download libevent-2.1.7-rc.tar.gz (what version is best?)
+
+        tar zxf libevent-release-2.1.7-rc.tar.gz
+	cd libevent-release-2.1.7-rc
+	./autogen.sh
+	./configure
+	make
+	make install
+
+7. Build/install forge_socket
+
+	git clone https://github.com/ewust/forge_socket
+	cd forge_socket
+	make
+	sudo insmod forge_socket.ko
+
+8. Build/install libtapdance
+
+	cd tapdance/libtapdance
+	make
+	make install
+
+	a) I added an INC_DIR to the Makefile to indicate the location
+           of forge_socket.
+
+        b) Add '-L/usr/local/lib' to LDFLAGS.
+
+	* NOTE: The following, c through e, are all compile-time warnings,
+                but the build does complete.
+
+	c) The following files need to be included in tapdance.c to avoid
+           compile warnings.
+
+		#include <unistd.h>
+		#include <event2/buffer.h>
+		#include "ssl_api.h"
+
+	d) tapdance.c:209:61: warning: passing argument 4 of 'ssl_decrypt' from incompatible pointer type
+
+		Update the code to cast the argument to (char **).
+
+	e) ssl_api.c:264:10: warning: implicit declaration of function 'ssl3_setup_buffers'
+
+		This function is defined in the openssl header file ssl_locl.h.
+		From what I can gather, this header file is intended to be
+		internal to openssl. It is not installed and not available
+		externally to other applications.
+
+9. Build/install DPDK (needed by startup.sh and configure_nic_for_pfring.sh)
+
+	wget fast.dpdk.org/rel/dpdk-16.04.tar.xz
+	tar xf dpdk-16.04.tar.xz
+	cd dpdk-16.04
+	
+	(per online dpdk documentation)
+
+	make config T=x86_64-native-linuxapp-gcc
+	sed -ri 's,(PMD_PCAP=).*,\1y,' build/.config
+	make
+
+10. Run tapdance/startup.sh script
+
+	cd tapdance
+	sudo ./startup.sh
+
+	a) Paths are hardcoded (dpdk, forge_socket)
+
+	b) The device "bus:slot.func" format is hardcoded. Use the
+	   'lshw -C network' command to determine this information.
+
+	   Also this device needs to be configured down.
+
+		ifconfig <interface> down
+
+	c) Need to add a "custom" routing table.
+
+		sudo su
+		echo 200 custom >> /etc/iproute2/rt_tables
+
+	d) Errors are given if (re)run and commands have already been executed.
+		- forge_socket.ko already loaded
+		- tun0 already exists
+		- tun0 rules already exist
+
+	e) There are instructions printed to screen when the script finishes
+	   to run an additional command. This seemed to apply to the dpdk
+	   implementation and not pfring. I did not execute this command.
+
+11. Run tapdance/configure_nic_for_pfring.sh script
+
+	cd tapdance
+	sudo ./configure_nic_for_pfring.sh
+
+	a) Again, path to dpdk is hardcoded.
+
+	b) The device type, name, and "bus:slot.func" format is hardcoded.
+
+12. Build/install tapdance/pfring-framework
+
+	The tapdance/README.md file simply instructs to do the following.
+
+		cd tapdance/pfring-framework/userland
+		make
+
+	However, the tapdance/prfing-framework/README.FIRST file had some
+	additional instructions.
+
+	cd tapdance/pfring-framework/kernel
+	make
+	make install
+
+	cd tapdance/pfring-framework/userland/lib
+	make
+	make install
+
+	cd tapdance/pfring-framework
+	insmod ./kernel/pf_ring.ko
+
+	Now we can follow the instructions in tapdance/README.md.
+
+	cd tapdance/pfring-framework/userland
+	make
+
+	a) /usr/bin/ld: cannot find -ltapdancemeasure
+
+	   I could not find this library or any mention of it anywhere in
+	   the tapdance repository. I updated the
+	   pfring-framework/userland/examples/Makefile.in to not include this
+	   library in the build.
+
+	b) undefined reference to 'get_cpu_time'
+
+	   Aha, I think this is related to our "missing" libtapdancemeasure.
+
+	   Go back to tapdance/libtapdance. Update the Makefile to include
+	   measure.c in the libtapdance target. Remake and reinstall.

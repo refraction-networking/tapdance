@@ -1,0 +1,17 @@
+Parsing logs for statistics
+
+
+# Connection times
+
+`python reconnect-times.py < /var/log/tapdance/gobbler/{*.s,current}`
+
+Outputs 
+5f4a39da284a759d5fe8cf5b02e39e0a 0.779 reconnect
+28ff6c5633edd9e61978ff924c6637bc 2.301 reconnect
+5f4a39da284a759d5fe8cf5b02e39e0a 23.124 lived
+5f4a39da284a759d5fe8cf5b02e39e0a 0.669 reconnect
+
+meaning that session 5f4a took 0.779 seconds between a delstream and a newstream
+then lived for 23.124 seconds, and then took 0.669 seconds to reconnect, etc...
+
+

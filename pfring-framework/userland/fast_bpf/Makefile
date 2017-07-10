@@ -1,0 +1,28 @@
+LEX = lex
+YACC = bison
+CC=gcc
+LIBS= `../lib/pfring_config --libs`
+CFLAGS=-Wall -fPIC    -O2 #-g
+OBJS=fast_bpf_mod_rdif.o rules.o tree_match.o parser.o lex.yy.o grammar.tab.o
+BPFLIB=libfastbpf.a
+
+all: test
+
+$(BPFLIB): $(OBJS)
+	ar rs $@ $(OBJS)
+	ranlib $@
+
+test: $(BPFLIB) test.c
+	gcc $(CFLAGS) -g test.c -o test $(BPFLIB) $(LIBS)
+
+lex.yy.c: scanner.l grammar.tab.h
+	$(LEX) scanner.l
+
+grammar.tab.h: grammar.tab.c
+
+grammar.tab.c: grammar.y
+	$(YACC) -d grammar.y
+
+clean:
+	rm -f test *~ *.o lex.yy.* grammar.tab.* $(BPFLIB)
+	rm -rf *.dSYM

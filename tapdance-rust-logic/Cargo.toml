@@ -1,0 +1,23 @@
+[package]
+name = "rust_tapdance"
+version = "0.1.1"
+authors = ["Fred Douglas <fed2@case.edu>"]
+include = ["src/*"]
+
+[lib]
+name = "rust_tapdance"
+crate-type = ["rlib", "staticlib"]
+#crate-type = ["dylib"]
+
+[dependencies]
+lazycell = "^0.5"
+libc = "~0.2"
+rust-crypto = "^0.2"
+time = "*"
+pnet = "0.15.0" # { git = "https://github.com/ewust/libpnet" }		#"0.10.0"
+mio = "0.6"
+tuntap = { git = "https://github.com/ewust/tuntap.rs.git" }
+arrayref = "0.3.2"
+log = "0.3.6"
+protobuf = "*"
+rand = "*"

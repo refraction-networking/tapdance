@@ -1,0 +1,58 @@
+# TapDance Makefile, modified from PF_RING examples Makefile.in
+
+TDDIR=$(HOME)/tapdance-build
+
+#
+# PF_RING
+#
+PFRINGDIR  = ../lib
+LIBPFRING  = ${PFRINGDIR}/libpfring.a
+
+#
+# PF_RING aware libpcap
+#
+O_FLAG     = -O2 -DHAVE_PF_RING
+EXTRA_LIBS =
+PCAPDIR    = ../libpcap
+LIBPCAP    = ${PCAPDIR}/libpcap.a  ${EXTRA_LIBS}
+
+#
+# Search directories
+#
+PFRING_KERNEL=../../kernel
+INCLUDE    = -I${PFRING_KERNEL} -I${PFRING_KERNEL}/plugins -I${PFRINGDIR} -I${PCAPDIR} -Ithird-party `../lib/pfring_config --include`
+INCLUDE	  += -I$(TDDIR)/include
+
+#
+# C compiler and flags
+#
+#
+# CROSS_COMPILE=arm-mv5sft-linux-gnueabi-
+#
+CC         = ${CROSS_COMPILE}gcc #--platform=native
+CFLAGS     = @CFLAGS@ ${O_FLAG} -Wall ${INCLUDE} @HAVE_BPF@ @HAVE_PF_RING_ZC@ @HAVE_REDIRECTOR@ -O2 # -g
+# LDFLAGS  =
+
+#
+# User and System libraries
+#
+DEBUG_OR_RELEASE = release
+LIBS       = ${LIBPCAP} ${LIBPFRING} ${LIBPCAP} ${LIBPFRING} `../lib/pfring_config --libs` -lpthread @SYSLIBS@ @REDIS_LIB@ -lrt -L../../../tapdance-rust-logic/target/${DEBUG_OR_RELEASE} -lrust_tapdance -ltapdance -L$(TDDIR)/lib -lssl -lcrypto -lgmp -ldl -lm
+
+all: tapdance
+
+tapdance.o: tapdance.c pfutils.c
+	${CC} ${CFLAGS} -c $< -o $@
+
+# Yes, it is correct that this uses tapdance.c.
+zc_tapdance.o: tapdance.c pfutils.c
+	${CC} -DTAPDANCE_USE_PF_RING_ZERO_COPY ${CFLAGS} -c $< -o $@
+
+tapdance: tapdance.o ${LIBPFRING}
+	${CC} ${CFLAGS} $< -o $@ ${LIBS}
+
+zc_tapdance: zc_tapdance.o ${LIBPFRING}
+	${CC} ${CFLAGS} $< -o $@ ${LIBS}
+
+clean:
+	@rm -f ${TARGETS} *.o *~
