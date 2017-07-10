@@ -3,7 +3,12 @@ High performance implementation of the Tapdance decoy routing design.
 # Building and Running the Tapdance Station
 
 These instructions are for the standard build, which includes
-drivers for Intel i40e- and ixgbe-based NICs.
+drivers for Intel i40e- and ixgbe-based NICs. 
+
+## Note
+
+This is the TapDance station code. You do not need this to be a user
+of TapDance; for that, you will need the [client](https://github.com/sergeyfrolov/gotapdance)
 
 ## Station installation
 
