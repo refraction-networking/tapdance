@@ -41,11 +41,11 @@ LIBS       = ${LIBPCAP} ${LIBPFRING} ${LIBPCAP} ${LIBPFRING} `../lib/pfring_conf
 
 all: tapdance
 
-tapdance.o: tapdance.c pfutils.c
+tapdance.o: tapdance.c pfutils.c ../../../tapdance-rust-logic/target/${DEBUG_OR_RELEASE}/librust_tapdance.a
 	${CC} ${CFLAGS} -c $< -o $@
 
 # Yes, it is correct that this uses tapdance.c.
-zc_tapdance.o: tapdance.c pfutils.c
+zc_tapdance.o: tapdance.c pfutils.c ../../../tapdance-rust-logic/target/${DEBUG_OR_RELEASE}/librust_tapdance.a
 	${CC} -DTAPDANCE_USE_PF_RING_ZERO_COPY ${CFLAGS} -c $< -o $@
 
 tapdance: tapdance.o ${LIBPFRING}
