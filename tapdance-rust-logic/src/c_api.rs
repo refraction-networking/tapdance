@@ -19,7 +19,6 @@ extern {
     fn BIO_s_mem() -> *mut c_void;
     fn BIO_write(bio: *mut c_void, data: *const u8, data_len: i32) -> i32;
     fn BIO_free_all(bio: *mut c_void);
-    fn SSL_pending(ssl: *const c_void) -> i32;
 }
 
 pub fn c_SSL_read(ssl: *mut c_void, output: &mut [u8])
@@ -71,7 +70,6 @@ pub fn c_BIO_write(bio: *mut c_void, data: &[u8]) -> i32
 {
     unsafe { BIO_write(bio, data.as_ptr(), data.len() as i32) }
 }
-pub fn c_SSL_pending(ssl: *const c_void) -> i32 { unsafe { SSL_pending(ssl) }}
 
 //#[cfg(not(test))]
 #[link(name = "tapdance")]
@@ -282,8 +280,6 @@ pub fn c_new_membio()
 pub fn c_BIO_write(bio: *mut c_void, data: &[u8]) -> i32
 {panic!("YOU ARE TESTING AND THIS FUNCTION IS NOT MOCKED YET!");}
 pub fn c_BIO_free_all(bio: *mut c_void)
-{panic!("YOU ARE TESTING AND THIS FUNCTION IS NOT MOCKED YET!");}
-pub fn c_SSL_pending(ssl: *const c_void) -> i32
 {panic!("YOU ARE TESTING AND THIS FUNCTION IS NOT MOCKED YET!");}
 pub fn c_make_forged_tls(local_ip: u32, local_port: u16,
                          remote_ip: u32, remote_port: u16,
