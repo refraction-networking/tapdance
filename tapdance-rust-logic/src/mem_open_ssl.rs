@@ -32,10 +32,15 @@ impl MemOpenSSL
         let raw_fed = c_api::c_BIO_write(self.membio_from_remote, input);
         if raw_fed < 0 { 0 } else { raw_fed as u32 }
     }
-    pub fn num_readbytes_ready(&self) -> i32
-    {
-        c_api::c_SSL_pending(self.ptr as *const c_void)
-    }
+    // SSL_pending can tell you 0 when SSL_read would read. If we want this
+    // functionality, this struct needs a buffer to hold SSL_read results, so
+    // this function can try directly and then report the buffer size. (Rather,
+    // this fn should become a bool; if we need to be able to say the exact
+    // size, the buffer could get huge). So, TODO? Or just remove?
+//     pub fn num_readbytes_ready(&self) -> i32
+//     {
+//         c_api::c_SSL_pending(self.ptr as *const c_void)
+//     }
 
     pub fn set_ssl_ptr(&mut self, ptr: *mut c_void)
     {
@@ -152,10 +157,6 @@ impl MemOpenSSL
             self.buf.extend(input.iter());
             input.len() as u32
         }
-    }
-    pub fn num_readbytes_ready(&self) -> i32
-    {
-        self.buf.len() as i32
     }
     pub fn set_ssl_ptr(&mut self, ptr: *mut c_void)
     { panic!("NOT MOCKED"); }

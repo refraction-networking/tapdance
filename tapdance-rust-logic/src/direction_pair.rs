@@ -97,20 +97,33 @@ impl DirectionPair
         };
     }
 
+    // Try to read a full message from whichever uploader is currently marked
+    // active (i.e. read from bidi iff bidi_is_active_uploader). The active/
+    // uploader is switched to the "new" one as soon as YIELD shows up in the
+    // "old" one, which is why we read current active, rather than inactive.
+    fn read_new_uploader(&mut self, data_buf: &mut [u8])
+    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
+              SessionError>
+    {
+        if !self.bidi_is_active_uploader {
+            if let Some(ref mut rdr) = self.uploader {
+                self.assembler.read_whole_cli_msg(data_buf, rdr)
+            } else {
+                self.assembler.read_whole_cli_msg(
+                    data_buf, &mut self.sorry_no_uploader_right_now)
+            }
+        } else {
+            self.assembler.read_whole_cli_msg(data_buf, &mut self.bidi)
+        }
+    }
+
     // sync_val should be yield_sync_val's (former) contents.
     // Ok(MsgRead) is whether to keep going (Complete), return with "partial
     // read", (Partial), or return with "wouldblock" (WouldBlock)
     fn do_switchover(&mut self, data_buf: &mut [u8], sync_val: u64)
     -> Result<MsgRead, SessionError>
     {
-        let res = if self.bidi_is_active_uploader {
-            self.assembler.read_whole_cli_msg(data_buf, &mut self.bidi)
-        } else if let Some(ref mut rdr) = self.uploader {
-            self.assembler.read_whole_cli_msg(data_buf, rdr)
-        } else {
-            self.assembler.read_whole_cli_msg(
-                data_buf, &mut self.sorry_no_uploader_right_now)
-        };
+        let res = self.read_new_uploader(data_buf);
         if let Ok((any_bytes, data_bytes, data_msg, maybe_proto)) = res {
             if data_bytes > 0 || data_msg.is_some() {
                 error!("Client sent a data msg when we expected ACQUIRE");

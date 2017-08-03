@@ -137,46 +137,47 @@ impl EventedSSLEavesdropper
     // phantom events if played outside of event processing. Phew, this is
     // complicated! (The other option is to stop using oneshot(), but that would
     // cause even more needless events).
-    fn if_readable_make_mio_notice(&mut self, during_event_processing: bool)
+    fn mio_notify_readable(&mut self, during_event_processing: bool)
     {
-        if self.mem_ssl.num_readbytes_ready() > 0
+        // OpenSSL has no reliable way to check if you can read without just
+        // trying the read. So... just always claim it's readable. This function
+        // only gets called when TCP progress is made: not too many WouldBlocks.
+        if during_event_processing
         {
-            if during_event_processing
-            {
-                self.set_became_readable_during_processing(true);
-            }
-            else
-            {
-                self.mio_hook.notify_readable();
-            }
+            self.set_became_readable_during_processing(true);
         }
+        else
+        {
+            self.mio_hook.notify_readable();
+        }
+    }
+    // An unwrap in feed_inorder_buffered_segments() relies on this fn returning
+    // Some iff tcp_buf is nonempty.
+    fn peek_front_usefulness(&self) -> Option<TcpSegmentUsefulness>
+    {
+        if let Some(seg) = self.tcp_buf.peek()
+        {
+            Some(self.segment_usefulness(seg.seq_start, seg.data.len() as u32))
+        }
+        else { None }
     }
     // Feed to SSL all segments in tcp_buf that have become in-order in the TCP
     // stream. (And drop those segments from tcp_buf.)
-    // during_event_processing: same as in if_readable_make_mio_notice().
+    // during_event_processing: same as in mio_notify_readable().
     fn feed_inorder_buffered_segments(&mut self, during_event_processing: bool)
     {
-        loop // while let Some(seg) = self.tcp_buf.peek(): borrow issues :(
+        while let Some(usefulness) = self.peek_front_usefulness()
         {
-            let usefulness =
+            match usefulness {
+            TcpSegmentUsefulness::UsefulNow(start_ind) =>
             {
-                if let Some(seg) = self.tcp_buf.peek() // condition for unwrap
-                {
-                    self.segment_usefulness(seg.seq_start,
-                                            seg.data.len() as u32)
-                }
-                else { break; }
-            };
-            if let TcpSegmentUsefulness::UsefulNow(start_ind) = usefulness
-            {
-                // unwrap relies on self.tcp_buf.peek() returning Some, above
+                // unwrap: "peek_front_usefulness returns Some" implies nonempty
                 let popped_seg = self.tcp_buf.pop().unwrap();
                 let any_progress = self.feed_or_buffer(
                     &popped_seg.data[start_ind..],
                     popped_seg.seq_start.wrapping_add(start_ind as u32),
                     popped_seg.is_fin,
                     during_event_processing);
-
                 if !any_progress
                 {
                     // Avoids an infinite loop in case we have a fragment that
@@ -184,18 +185,12 @@ impl EventedSSLEavesdropper
                     // (I am SO glad this got caught in the initial unit tests!)
                     break;
                 }
-            }
-            else if usefulness == TcpSegmentUsefulness::UsefulLater
-            {
-                break;
-            }
-            else // useful never
-            {
-                let _ = self.tcp_buf.pop();
-                // Do NOT break. Chunks later in the heap may be usable.
+            },
+            TcpSegmentUsefulness::UsefulLater => break,
+            // Do NOT break. Chunks later in the heap may be usable.
+            TcpSegmentUsefulness::UsefulNever => {let _ = self.tcp_buf.pop();},
             }
         }
-        self.if_readable_make_mio_notice(during_event_processing);
     }
     // slice_seq_start should be the TCP seq# of the first byte of the slice.
     fn add_slice_to_buffer(&mut self, the_slice: &[u8], slice_seq_start: u32,
@@ -223,7 +218,7 @@ impl EventedSSLEavesdropper
 
     // Feed this chunk to OpenSSL, or buffer it for later. (Or do nothing if it
     // will never be needed).
-    // during_event_processing: same as in if_readable_make_mio_notice().
+    // during_event_processing: same as in mio_notify_readable().
     // Returns whether any progress was made, i.e., any bytes accepted by BIO.
     fn feed_or_buffer(&mut self, chunk: &[u8], chunk_seq_start: u32,
                       is_fin: bool, during_event_processing: bool) -> bool
@@ -242,13 +237,13 @@ impl EventedSSLEavesdropper
                     &chunk[buf_ind_start..], fed, is_fin,
                     chunk_seq_start.wrapping_add(buf_ind_start as u32));
             }
-            else if is_fin
+            if is_fin
             {
                 self.in_order_fin_received = true;
             }
-            self.if_readable_make_mio_notice(during_event_processing);
             if fed > 0
             {
+                self.mio_notify_readable(during_event_processing);
                 return true;
             }
         }
