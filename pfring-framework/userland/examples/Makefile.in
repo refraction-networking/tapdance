@@ -38,14 +38,15 @@ CFLAGS     = @CFLAGS@ ${O_FLAG} -Wall ${INCLUDE} @HAVE_BPF@ @HAVE_PF_RING_ZC@ @H
 #
 DEBUG_OR_RELEASE = release
 LIBS       = ${LIBPCAP} ${LIBPFRING} ${LIBPCAP} ${LIBPFRING} `../lib/pfring_config --libs` -lpthread @SYSLIBS@ @REDIS_LIB@ -lrt -L../../../tapdance-rust-logic/target/${DEBUG_OR_RELEASE} -lrust_tapdance -ltapdance -L$(TDDIR)/lib -lssl -lcrypto -lgmp -ldl -lm
+OUR_OWN_LIB_DEPS = ../../../tapdance-rust-logic/target/${DEBUG_OR_RELEASE}/librust_tapdance.a ../../../libtapdance/libtapdance.a
 
 all: tapdance
 
-tapdance.o: tapdance.c pfutils.c
+tapdance.o: tapdance.c pfutils.c ${OUR_OWN_LIB_DEPS}
 	${CC} ${CFLAGS} -c $< -o $@
 
 # Yes, it is correct that this uses tapdance.c.
-zc_tapdance.o: tapdance.c pfutils.c
+zc_tapdance.o: tapdance.c pfutils.c ${OUR_OWN_LIB_DEPS}
 	${CC} -DTAPDANCE_USE_PF_RING_ZERO_COPY ${CFLAGS} -c $< -o $@
 
 tapdance: tapdance.o ${LIBPFRING}
