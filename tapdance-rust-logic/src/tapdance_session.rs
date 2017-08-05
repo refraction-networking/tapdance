@@ -1,12 +1,16 @@
 use pnet::packet::tcp::TcpPacket;
+use protobuf::Message;
 
 use bufferable_tcp::BufferableTCP;
 use buffered_tunnel::BufferedTunnel;
+use c_api;
 use direction_pair::DirectionPair;
 use protocol_sta2cli;
+use protocol_sta2cli::empty_proto_frame_with_len;
 use rereg_queuer::ReregQueuer;
 use session_error::SessionError;
 use session_id::SessionId;
+use signalling::{ClientToStation, C2S_Transition, S2C_Transition};
 use stream_traits::{BufStat, ReadStat, ShutStat, WriteStat, StreamReceiver};
 
 // How many burst sizes (currently 16KiB, max SSL record size) worth of data
@@ -27,8 +31,8 @@ pub struct TapdanceSession
     pub expect_uploader_reconnect: bool,
     already_errored_out: bool,
     pub decoy_ip: String,
-    pub received_gen: bool, // false until our first protobuf from client (first reconnect)
-
+    pub received_gen: bool, // false until our first protobuf from client (first
+                            // reconnect)
     pub cli2cov_bytes_tot:  usize,
     pub cov2cli_bytes_tot:  usize,
 }
@@ -279,7 +283,7 @@ impl TapdanceSession
             return false;
         }
         let mut recvd = [0; 32*1024];
-        let (any_bytes_read, recvd_size, asmbld_data, whole_proto) = {
+        let r = {
             let res = self.cli_pair.read_whole_cli_msg(&mut recvd);
             if let Ok(stuff) = res {
                 stuff
@@ -288,27 +292,28 @@ impl TapdanceSession
                 return false;
             }
         };
-        if !any_bytes_read {
+        if !r.any_bytes_read {
             // Buffer stall sanity check: either we're shutting down or it's a
             // WOULDBLOCK, in which case we can expect a readable.
             return false;
         }
-        if recvd_size > 0 || asmbld_data.is_some() {
+        if r.msg_size_in_buf > 0 || r.asmbld_msg.is_some() {
             // data should be in at most one of recvd / the returned Vec.
-            if recvd_size > 0 && asmbld_data.is_some() {
+            if r.msg_size_in_buf > 0 && r.asmbld_msg.is_some() {
                 error!("Have both one-shot and assembled data. Shouldn't \
                         happen. Session {} erroring out.", self.session_id);
                 self.end_whole_session_error(SessionError::StationInternal);
                 return false;
             }
             let (status, sent_len) =
-                if recvd_size > 0 {
-                    (self.cov.write(&recvd[0..recvd_size]), recvd_size)
-                } else if let Some(asmbld) = asmbld_data {
+                if r.msg_size_in_buf > 0 {
+                    (self.cov.write(&recvd[0..r.msg_size_in_buf]),
+                     r.msg_size_in_buf)
+                } else if let Some(asmbld) = r.asmbld_msg {
                     let ref asmbld_slice = asmbld.as_slice();
                     (self.cov.write(asmbld_slice), asmbld_slice.len())
                 } else {
-                    error!("wait what? neighter recvd_size>0 nor
+                    error!("wait what? neither r.msg_size_in_buf>0 nor
                             asmbld_date.is_some. Session {} erroring out.",
                             self.session_id);
                     self.end_whole_session_error(SessionError::StationInternal);
@@ -329,7 +334,7 @@ impl TapdanceSession
             // completes (so we keep reading), or else the write buffers, and so
             // a writeable will eventually fire. (Or err ends the session).
         }
-        if let Some(proto) = whole_proto {
+        if let Some(proto) = r.proto {
             self.process_cli2sta_proto(proto);
             // Buffer stall sanity check: always return true => always keep
             // reading => no stall.
@@ -339,14 +344,74 @@ impl TapdanceSession
         // message was not completed; more to come.
         return true;
     }
+    // Consume a raw TCP packet, if our DirectionPair currently has an
+    // upload-only component looking for such raw packets.
     // Returns false if FlowTracker should stop tracking this packet's flow.
     pub fn consume_tcp_pkt(&mut self, tcp_pkt: &TcpPacket) -> bool
     {
-        // TODO TODO TODO DittoTap 
-        // for now, just pass it to self.cli_pair's uploader. eventually,
-        // though, this function will direct it either to the split-dir
-        // upload-only, OR to the dittoTap bidi (could be reader or writer!)
         self.cli_pair.consume_tcp_pkt(tcp_pkt)
+    }
+    pub fn process_cli2sta_proto(&mut self, proto: ClientToStation)
+    {
+        let cli_conf = unsafe { & *c_api::c_get_global_cli_conf() };
+
+        if !self.received_gen {
+            report!("listgen {} {}", self.session_id,
+                    proto.get_decoy_list_generation());
+            self.received_gen = true;
+        }
+
+        // defaults to 0
+        if proto.get_decoy_list_generation() < cli_conf.get_generation() {
+            let mut sta2cli = protocol_sta2cli::make_simple_proto(
+                S2C_Transition::S2C_NO_CHANGE);
+            sta2cli.set_config_info(cli_conf.clone());
+            let mut framed_proto =
+                empty_proto_frame_with_len(sta2cli.compute_size() as usize);
+            sta2cli.write_to_vec(&mut framed_proto)
+                   .unwrap_or_else(|e|{error!("writing sta2cli body: {}", e);});
+            debug!("About to write a {}-byte ClientConf", framed_proto.len());
+            if !self.nonfreezy_cli_write(framed_proto.as_slice()) {
+                error!("Couldn't send ClientConf proto! Bailing on {}",
+                       self.session_id);
+                self.end_whole_session_error(SessionError::ClientStream);
+            }
+        }
+
+        // Empty field defaults to NO_CHANGE
+        match proto.get_state_transition() {
+        C2S_Transition::C2S_NO_CHANGE => {},
+        C2S_Transition::C2S_EXPECT_RECONNECT =>
+            self.expect_bidi_reconnect = true,
+        C2S_Transition::C2S_ACQUIRE_UPLOAD =>
+            warn!("Got C2S_ACQUIRE_UPLOAD outside of \
+                   DirectionPair::do_switchover! Session {}", self.session_id),
+        C2S_Transition::C2S_EXPECT_UPLOADONLY_RECONN =>
+            self.expect_uploader_reconnect = true,
+        C2S_Transition::C2S_SESSION_CLOSE => {
+            self.cov.half_close();
+            // TODO HACK don't want to be treating a CLOSE message as also
+            // a hangup of the underlying stream, but... it fits with how
+            // the client currently works, and guarantees proper shutdown.
+            if self.cli_pair.bidi_is_active_uploader {
+                self.handle_cli_bidi_hup();
+            } else {
+                self.handle_cli_uploader_hup();
+            }
+        },
+        C2S_Transition::C2S_YIELD_UPLOAD =>
+            if let Err(e) =
+               self.cli_pair.notice_uploader_yield(proto.get_upload_sync())
+            {
+                self.end_whole_session_error(e);
+            },
+        C2S_Transition::C2S_ERROR =>
+            self.end_whole_session_error(SessionError::ClientReported),
+        }
+
+        for failed in proto.get_failed_decoys() {
+            c_api::c_add_decoy_failure(failed);
+        }
     }
 }
 
@@ -358,3 +423,64 @@ impl Drop for TapdanceSession
                self.cov2cli_bytes_tot, self.cli2cov_bytes_tot);
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#[cfg(test)]
+mod tests {
+
+use protobuf;
+use signalling::ClientToStation;
+use session_id::SessionId;
+
+#[test]
+fn format_failed_decoys()
+{
+    let session_id = SessionId::new(&[255,255,255,255,255,255,255,255,
+                                      255,255,255,255,255,255,255,255]);
+    let mut msg1 = ClientToStation::new();
+    msg1.set_protocol_version(123);
+    assert_eq!(0, msg1.get_failed_decoys().len());
+
+    let mut msg2 = ClientToStation::new();
+    msg2.set_protocol_version(123);
+    *msg2.mut_failed_decoys().push_default() = "1.2.3.4".to_string();
+    let would_report2 = format!("decoysfailed {} {}", session_id,
+                                msg2.get_failed_decoys().join(" "));
+    assert_eq!("decoysfailed ffffffffffffffffffffffffffffffff 1.2.3.4",
+               would_report2);
+
+    let mut msg3 = ClientToStation::new();
+    msg3.set_protocol_version(123);
+    *msg3.mut_failed_decoys().push_default() = "5.6.7.8".to_string();
+    *msg3.mut_failed_decoys().push_default() = "9.10.11.12".to_string();
+    let would_report3 = format!("decoysfailed {} {}", session_id,
+                                msg3.get_failed_decoys().join(" "));
+    assert_eq!("decoysfailed ffffffffffffffffffffffffffffffff 5.6.7.8 \
+                9.10.11.12", would_report3);
+
+    let mut msg4 = ClientToStation::new();
+    msg4.set_protocol_version(123);
+    *msg4.mut_failed_decoys().push_default() = "1.1.1.1".to_string();
+    *msg4.mut_failed_decoys().push_default() = "22.22.22.22".to_string();
+    *msg4.mut_failed_decoys().push_default() = "233.233.233.233".to_string();
+    let would_report4 = format!("decoysfailed {} {}", session_id,
+                                msg4.get_failed_decoys().join(" "));
+    assert_eq!("decoysfailed ffffffffffffffffffffffffffffffff \
+                1.1.1.1 22.22.22.22 233.233.233.233", would_report4);
+}
+
+} // mod tests
+

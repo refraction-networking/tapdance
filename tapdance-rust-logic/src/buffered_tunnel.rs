@@ -61,34 +61,11 @@ impl<S: BufferableSender + StreamReceiver + Evented> BufferedTunnel<S>
         }
         let mut do_half_close = false;
         let res = {
-        if let Some(ref mut s) = self.stream {
+        if self.stream.is_some() {
             while !self.buf.is_empty() {
-                let mut spliced_vec: Vec<u8> = Vec::new();
-                let bytes_written = {
-                    // VecDeque can give you its data as two separate chunks if
-                    // the underlying ring buffer has wrapped around.
-                    let buf_slice = {
-                        let (a, b) = self.buf.as_slices();
-                        if b.len() != 0 {
-                            spliced_vec.reserve(a.len() + b.len());
-                            spliced_vec.extend_from_slice(a);
-                            spliced_vec.extend_from_slice(b);
-                            &spliced_vec[..]
-                        }
-                        else { a }
-                    };
-                    let chunk_len = if buf_slice.len() > MAX_WRITE_SIZE
-                                    {MAX_WRITE_SIZE} else {buf_slice.len()};
-                    match s.send(&buf_slice[0..chunk_len]) {
-                        RawWriteStat::Sent(n) => n,
-                        RawWriteStat::WouldBlock => 0,
-                        RawWriteStat::Error => {return BufStat::Error;}
-                    }
-                };
-                if bytes_written > 0 {
-                    self.buf.drain(0..bytes_written);
-                } else {
-                    break;
+                match self.drain_some() {
+                    Ok(n) => { if n == 0 {break} }, // nothing to or can't drain
+                    Err(_) => { return BufStat::Error; }
                 }
             }
             if self.buf.is_empty() {
@@ -117,6 +94,38 @@ impl<S: BufferableSender + StreamReceiver + Evented> BufferedTunnel<S>
             self.half_close(); // calls clean_shutdown()+handles result
         }
         return res;
+    }
+    // Returns number of bytes drained/written to stream.
+    fn drain_some(&mut self) -> Result<usize, ()>
+    {
+        let mut spliced_vec: Vec<u8> = Vec::new();
+        let bytes_written = {
+            // VecDeque can give you its data as two separate chunks if
+            // the underlying ring buffer has wrapped around.
+            let buf_slice = {
+                let (a, b) = self.buf.as_slices();
+                if b.len() != 0 {
+                    spliced_vec.reserve(a.len() + b.len());
+                    spliced_vec.extend_from_slice(a);
+                    spliced_vec.extend_from_slice(b);
+                    &spliced_vec[..]
+                }
+                else { a }
+            };
+            let chunk_len = if buf_slice.len() > MAX_WRITE_SIZE
+                            {MAX_WRITE_SIZE} else {buf_slice.len()};
+            if let Some(ref mut s) = self.stream {
+                match s.send(&buf_slice[0..chunk_len]) {
+                    RawWriteStat::Sent(n) => n,
+                    RawWriteStat::WouldBlock => 0,
+                    RawWriteStat::Error => {return Err(());}
+                }
+            } else { return Ok(0); }
+        };
+        if bytes_written > 0 {
+            self.buf.drain(0..bytes_written);
+        }
+        return Ok(bytes_written);
     }
 
     pub fn write(&mut self, data: &[u8]) -> WriteStat

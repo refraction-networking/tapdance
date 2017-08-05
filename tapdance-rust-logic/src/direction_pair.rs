@@ -4,7 +4,7 @@ use pnet::packet::tcp::TcpPacket;
 use bufferable_ssl::BufferableSSL;
 use buffered_tunnel::BufferedTunnel;
 use evented_ssl_eavesdropper::EventedSSLEavesdropper;
-use protocol_outer_framing::OuterFrameMsgAssembler;
+use protocol_outer_framing::{OuterFrameMsgAssembler, ReadMsgRes};
 use session_error::SessionError;
 use signalling::{ClientToStation, C2S_Transition};
 use stream_traits::{StreamReceiver, BufStat, ReadStat, ShutStat, WriteStat};
@@ -61,25 +61,16 @@ impl DirectionPair
     // Returns a full message (if available) from the active uploader stream.
     // Handles the switch (verifies ACQUIRE) if there was previously a YIELD.
     // (process_cli2sta_proto() is what processes and effects the YIELD).
-    //
-    // Return values are:
-    // 1) any_bytes_read (i.e. raw from the stream. 0 => shutdown or blocking).
-    // 2) num_bytes_recvd_for_complete_data_msg (i.e. the first this many bytes
-    //    of data_buf are filled with good data)
-    // 3) a data message that was assembled. It's in here rather than written
-    //    into data_buf for purely plumbing reasons.
-    // 4) maybe_a_proto
     pub fn read_whole_cli_msg(&mut self, data_buf: &mut [u8])
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
         if let Some(sync_val) = self.yield_sync_val {
             let r = self.do_switchover(data_buf, sync_val);
             if let Ok(status) = r {
                 match status {
                     MsgRead::Complete => {},
-                    MsgRead::Partial => return Ok((true, 0, None, None)),
-                    MsgRead::WouldBlock => return Ok((false, 0, None, None))
+                    MsgRead::Partial => return Ok(ReadMsgRes::some_progress()),
+                    MsgRead::WouldBlock => return Ok(ReadMsgRes::no_progress())
                 }
             }
             else if let Err(e) = r {
@@ -94,7 +85,7 @@ impl DirectionPair
         } else {
             return self.assembler.read_whole_cli_msg(
                 data_buf, &mut self.sorry_no_uploader_right_now);
-        };
+        }
     }
 
     // Try to read a full message from whichever uploader is currently marked
@@ -102,8 +93,7 @@ impl DirectionPair
     // uploader is switched to the "new" one as soon as YIELD shows up in the
     // "old" one, which is why we read current active, rather than inactive.
     fn read_new_uploader(&mut self, data_buf: &mut [u8])
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
         if !self.bidi_is_active_uploader {
             if let Some(ref mut rdr) = self.uploader {
@@ -124,13 +114,13 @@ impl DirectionPair
     -> Result<MsgRead, SessionError>
     {
         let res = self.read_new_uploader(data_buf);
-        if let Ok((any_bytes, data_bytes, data_msg, maybe_proto)) = res {
-            if data_bytes > 0 || data_msg.is_some() {
+        if let Ok(r) = res {
+            if r.msg_size_in_buf > 0 || r.asmbld_msg.is_some() {
                 error!("Client sent a data msg when we expected ACQUIRE");
                 return Err(SessionError::ClientProtocol);
-            } else if !any_bytes {
+            } else if !r.any_bytes_read {
                 return Ok(MsgRead::WouldBlock);
-            } else if let Some(proto) = maybe_proto {
+            } else if let Some(proto) = r.proto {
                 if proto.get_state_transition() !=
                     C2S_Transition::C2S_ACQUIRE_UPLOAD ||
                     proto.get_upload_sync() != sync_val
@@ -147,11 +137,11 @@ impl DirectionPair
         }
         self.yield_sync_val = None;
         // That's it; the switch is already done, ACQUIRE just confirms it.
-        Ok(MsgRead::Complete)
+        return Ok(MsgRead::Complete);
     }
 
-    // TODO rename: this doesn't "do" the yield so much as notice it
-    pub fn do_yield(&mut self, sync_val: u64) -> Result<(), SessionError>
+    pub fn notice_uploader_yield(&mut self, sync_val: u64)
+    -> Result<(), SessionError>
     {
         if !self.assembler.is_fresh()
         {
@@ -183,8 +173,6 @@ impl DirectionPair
                     cli_ssl_poll: &Poll) -> bool
     {
         if self.bidi.stream_is_some() && self.bidi_is_active_uploader {
-            // TODO if "expect_reconnect", probably it's fine to treat this as
-            // an implicit close of the previous stream, and just replace it.
             error!("Trying to overwrite a bidi!");
             return false;
         }
@@ -207,8 +195,6 @@ impl DirectionPair
                                 new_tok: UniqTok, cli_psv_poll: &Poll) -> bool
     {
         if self.uploader.is_some() {
-            // TODO if "expect_UPL_reconnect", probably it's fine to treat this
-            // as an implicit close of the previous stream, and just replace it.
             error!("Trying to overwrite an upload-only!");
             return false;
         }
@@ -228,13 +214,11 @@ impl DirectionPair
         // cleanup after event processing will get it (as well as remove it
         // from its tok2sess map).
     }
+    // Consume a raw TCP packet, if there is an upload-only component looking
+    // for such raw packets.
     // Returns false if FlowTracker should stop tracking this packet's flow.
     pub fn consume_tcp_pkt(&mut self, tcp_pkt: &TcpPacket) -> bool
     {
-        // TODO TODO TODO DittoTap
-        // for now, just pass it to self.cli_pair's uploader. eventually,
-        // though, this function will direct it either to the split-dir
-        // upload-only, OR to the dittoTap bidi (could be reader or writer!)
         if let Some(ref mut u) = self.uploader {
             u.consume_tcp_pkt(tcp_pkt)
         }

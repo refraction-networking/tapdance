@@ -3,12 +3,7 @@ High performance implementation of the Tapdance decoy routing design.
 # Building and Running the Tapdance Station
 
 These instructions are for the standard build, which includes
-drivers for Intel i40e- and ixgbe-based NICs. 
-
-## Note
-
-This is the TapDance station code. You do not need this to be a user
-of TapDance; for that, you will need the [client](https://github.com/sergeyfrolov/gotapdance)
+drivers for Intel i40e- and ixgbe-based NICs.
 
 ## Station installation
 
@@ -33,7 +28,13 @@ every reboot.
  1. In `$HOME/tapdance`, run `sudo ./startup.sh`. The output should include
     the following instructions on running the station.
 
-## Running the station
+## Running the station (production)
+
+Use the `service` interface, as described in `sysvinit/README`. Note that you
+might need to wait a few seconds after starting zbalance before you start
+tapdance, to let zbalance come fully online.
+
+## Running the station (development)
 
 If you want to recompile before running:
  1. In `$HOME/tapdance`, run `./scripts/tapdance-build.sh` (NOT sudo/as root)

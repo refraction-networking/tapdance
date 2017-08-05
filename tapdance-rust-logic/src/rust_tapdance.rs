@@ -46,7 +46,6 @@ pub mod evented_ssl_eavesdropper;
 pub mod flow_tracker;
 pub mod mem_open_ssl;
 pub mod process_packet;
-pub mod protocol_cli2sta;
 pub mod protocol_outer_framing;
 pub mod protocol_sta2cli;
 pub mod rereg_queuer;

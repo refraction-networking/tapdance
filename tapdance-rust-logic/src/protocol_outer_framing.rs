@@ -41,6 +41,60 @@ fn endianness_guard() -> i32
     mem::transmute::<[u8; 4], i32>([x, **y, *z, 123u8])
 }
 
+// The result of an attempt to read an outer-framing'd message (can be either a
+// chunk of covert data or a ClientToStation proto). This struct should always
+// be used in conjunction with a buffer, provided by the caller, that a covert
+// data chunk can be written into; this is the buffer that msg_size_in_buf is
+// supposed to refer to.
+// msg_size_in_buf != 0 and asmbld_msg.is_some() should be mutually exclusive.
+// any_bytes_read is necessary because some of the logic that uses this result
+// is also involved in buffering.
+pub struct ReadMsgRes
+{
+    pub any_bytes_read: bool,
+    pub msg_size_in_buf: usize,
+    pub asmbld_msg: Option<Vec<u8>>,
+    pub proto: Option<ClientToStation>,
+}
+impl ReadMsgRes
+{
+    pub fn with_direct(msg_size: usize) -> ReadMsgRes
+    {
+        ReadMsgRes { any_bytes_read: true,
+                     msg_size_in_buf: msg_size,
+                     asmbld_msg: None,
+                     proto: None }
+    }
+    pub fn with_assembled(data: Vec<u8>) -> ReadMsgRes
+    {
+        ReadMsgRes { any_bytes_read: true,
+                     msg_size_in_buf: 0,
+                     asmbld_msg: Some(data),
+                     proto: None }
+    }
+    pub fn with_proto(proto: ClientToStation) -> ReadMsgRes
+    {
+        ReadMsgRes { any_bytes_read: true,
+                     msg_size_in_buf: 0,
+                     asmbld_msg: None,
+                     proto: Some(proto) }
+    }
+    pub fn some_progress() -> ReadMsgRes
+    {
+        ReadMsgRes { any_bytes_read: true,
+                     msg_size_in_buf: 0,
+                     asmbld_msg: None,
+                     proto: None }
+    }
+    pub fn no_progress() -> ReadMsgRes
+    {
+        ReadMsgRes { any_bytes_read: false,
+                     msg_size_in_buf: 0,
+                     asmbld_msg: None,
+                     proto: None }
+    }
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum FrameMsgState
 {
@@ -193,45 +247,44 @@ impl OuterFrameMsgAssembler
     // 2bufs variants are for those cases.
     //
     // Consume tl_hdr, then consume buf2, then consume from a read().
-    // The return values have the same meaning as those of read_whole_cli_msg().
     fn full_cli_parse_2bufs(&mut self, tl_hdr: &[u8], buf2: &[u8],
                             reader: &mut StreamReceiver)
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
         if tl_hdr.len() > 2 {
             error!("You passed a slice larger than 2 for tl_hdr. You're \
                     probably using full_cli_parse_2bufs() wrong.");
-            return Err(SessionError::StationInternal);
+            Err(SessionError::StationInternal)
         }
-        let (_, _) = self.consume(tl_hdr);
-        return self.full_cli_parse_1buf(buf2, reader);
+        else {
+            let (_, _) = self.consume(tl_hdr);
+            self.full_cli_parse_1buf(buf2, reader)
+        }
     }
     // Consume buf, then consume from a read().
-    // The return values have the same meaning as those of read_whole_cli_msg().
     fn full_cli_parse_1buf(&mut self, buf: &[u8], reader: &mut StreamReceiver)
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
-        let recmnd_size = self.recommended_consume_size();
-        if recmnd_size < buf.len() {
+        if self.recommended_consume_size() < buf.len() {
             error!("Already-read buf larger than assembler wants to consume.");
-            return Err(SessionError::StationInternal);
+            Err(SessionError::StationInternal)
         }
-        let (maybe_data, maybe_proto) = self.consume(buf);
-        if maybe_data.is_some() {
-            return Ok((true, 0, maybe_data, None));
+        else {
+            let (maybe_data, maybe_proto) = self.consume(buf);
+            if let Some(data) = maybe_data {
+                Ok(ReadMsgRes::with_assembled(data))
+            }
+            else if let Some(proto) = maybe_proto {
+                Ok(ReadMsgRes::with_proto(proto))
+            }
+            else {
+                self.full_cli_parse_no_buf(reader)
+            }
         }
-        if maybe_proto.is_some() {
-            return Ok((true, 0, None, maybe_proto));
-        }
-        return self.full_cli_parse_no_buf(reader);
     }
     // Consume from a read().
-    // The return values have the same meaning as those of read_whole_cli_msg().
     fn full_cli_parse_no_buf(&mut self, reader: &mut StreamReceiver)
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
         let recmnd_read_size = self.recommended_consume_size();
         let mut rbuf = [0; 32*1024];
@@ -239,29 +292,25 @@ impl OuterFrameMsgAssembler
                            else                             {recmnd_read_size};
         let read_size = read_from_stream(reader, &mut rbuf[0..attempt_size]);
         if read_size <= 0 {
-            return Ok((false, 0, None, None)); // "reads are blocking"
+            Ok(ReadMsgRes::no_progress()) // "reads are blocking"
         }
-        let (maybe_data, maybe_proto) = self.consume(&rbuf[0..read_size]);
-        if maybe_data.is_some() {
-            return Ok((true, 0, maybe_data, None));
+        else {
+            let (maybe_data, maybe_proto) = self.consume(&rbuf[0..read_size]);
+            if let Some(data) = maybe_data {
+                Ok(ReadMsgRes::with_assembled(data))
+            }
+            else if let Some(proto) = maybe_proto {
+                Ok(ReadMsgRes::with_proto(proto))
+            }
+            else {
+                Ok(ReadMsgRes::some_progress())
+            }
         }
-        if maybe_proto.is_some() {
-            return Ok((true, 0, None, maybe_proto));
-        }
-        return Ok((true, 0, None, None));
     }
 
-    // Return values are
-    // 1) any_bytes_read (i.e. raw from the stream. 0 => shutdown or blocking).
-    // 2) num_bytes_recvd_for_complete_data_msg (i.e. the first this many bytes
-    //    of data_buf are filled with good data)
-    // 3) a data message that was assembled. It's in here rather than written
-    //    into data_buf for purely plumbing reasons.
-    // 4) maybe_a_proto
     pub fn read_whole_cli_msg(&mut self, data_buf: &mut [u8],
                               reader: &mut StreamReceiver)
-    -> Result<(bool, usize, Option<Vec<u8>>, Option<ClientToStation>),
-              SessionError>
+    -> Result<ReadMsgRes, SessionError>
     {
         // If we're in the middle of a message, have the machinery handle it.
         if !self.is_fresh() {
@@ -273,7 +322,7 @@ impl OuterFrameMsgAssembler
         let mut recvd_tl = [0; 2];
         let tl_bytes_read = read_from_stream(reader, &mut recvd_tl);
         if tl_bytes_read <= 0 {
-            return Ok((false, 0, None, None)); // "reads are blocking"
+            return Ok(ReadMsgRes::no_progress()); // "reads are blocking"
         }
         // Only got 1 of the 2 bytes? Toss it into the machine and we're done.
         if tl_bytes_read == 1 {
@@ -293,7 +342,7 @@ impl OuterFrameMsgAssembler
                           else                        { msg_len };
         let bytes_read = read_from_stream(reader,&mut data_buf[0..attmpt_size]);
         if bytes_read <= 0 {
-            // the machine will return the "reads are blocking" 'false' for us.
+            // The machine will return ReadMsgRes::no_progress() for us.
             return self.full_cli_parse_1buf(&recvd_tl[0..2], reader);
         }
         // If we didn't get the whole thing, throw everything we have into the
@@ -307,17 +356,17 @@ impl OuterFrameMsgAssembler
             match protobuf::parse_from_bytes::<ClientToStation>
                                               (&data_buf[0..bytes_read])
             {
-                Ok(p) => Some(p),
+                Ok(p) => p,
                 Err(e) => {
                     error!("Parsing a supposed protoblob failed: {:?}", e);
                     return Err(SessionError::ClientProtocol);}
             };
-            return Ok((true, 0, None, ret_proto));
+            return Ok(ReadMsgRes::with_proto(ret_proto));
         }
         else {
             // Because we read directly into data_buf, we just report how many
             // bytes were read; no copies! Hooray!
-            return Ok((true, bytes_read, None, None));
+            return Ok(ReadMsgRes::with_direct(bytes_read));
         }
     }
 }

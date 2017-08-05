@@ -103,7 +103,7 @@ impl ClientDriver for ClientSSLDriver
              session_cli_count, maybe_drop_tok) =
         {
             let ref mut td = {
-                if let Some(td_rc) = self.tok2sess.get_mut(token) { //TODO if this is get() rather than get_mut() can we clean this fn up?
+                if let Some(td_rc) = self.tok2sess.get_mut(token) {
                     td_rc.borrow_mut()
                 } else {
                     warn!("SSL ev loop fired for {:?}; not in tokmap.", token);

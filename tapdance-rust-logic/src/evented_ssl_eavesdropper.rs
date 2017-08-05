@@ -112,7 +112,6 @@ impl EventedSSLEavesdropper
     // Returns false if FlowTracker should drop this flow.
     pub fn consume_tcp_pkt(&mut self, tcp_pkt: &TcpPacket) -> bool
     {
-        // TODO validate checksums? or does process_packet do that?
         let tcp_flags = tcp_pkt.get_flags();
         if (tcp_flags & TcpFlags::RST) != 0
         {

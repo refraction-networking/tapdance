@@ -354,17 +354,34 @@ const flow1_diff_sport: Flow =
 const flow1_diff_dport: Flow =
     Flow { src_ip: 1234, dst_ip: 5678, src_port: 33333, dst_port: 80 };
 
+fn test_default_syn() -> Vec<u8>
+{
+    vec!(0xe3, 0x2c, // src port
+         0x01, 0xbb, // dst port 443
+         0x43, 0xb0, 0x9f, 0x78, // seq# (1135648632)
+         0, 0, 0, 0, // ACK 0
+         160, // 50 byte header = offset 10, 10 << 4 = 160
+         2, // SYN flag
+         0xaa, 0xaa, // window
+         0x5a, 0x0e, // checksum
+         0, 0, // urgent pointer
+         // 20 bytes of options, from the SYN of `iperf -c localhost -p 443`:
+         // [mss 65495,sackOK,TS val 885507 ecr 0,nop,wscale 7]
+         0x02, 0x04, 0xff, 0xd7, // mss 65495
+         0x04, 0x02, 0x08, 0x0a, 0x00, 0x0d, 0x83, 0x03,
+         0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x03, 0x07)
+}
 
 #[test]
 fn begin_tracking_flow_add_flows()
 {
     let mut ft = FlowTracker::new();
     assert_eq!(0, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert_eq!(1, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow3, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow3, test_default_syn());
     assert_eq!(3, ft.tracked_flows.len());
 }
 
@@ -373,15 +390,15 @@ fn begin_tracking_uses_whole_4tuple()
 {
     let mut ft = FlowTracker::new();
     assert_eq!(0, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert_eq!(1, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1_diff_srcip, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1_diff_srcip, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1_diff_dstip, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1_diff_dstip, test_default_syn());
     assert_eq!(3, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1_diff_sport, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1_diff_sport, test_default_syn());
     assert_eq!(4, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1_diff_dport, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1_diff_dport, test_default_syn());
     assert_eq!(5, ft.tracked_flows.len());
 }
 
@@ -400,13 +417,13 @@ fn begin_tracking_flow_ignore_duplicate()
 {
     let mut ft = FlowTracker::new();
     assert_eq!(0, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert_eq!(1, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1_clone, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1_clone, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
 }
 
@@ -414,8 +431,8 @@ fn begin_tracking_flow_ignore_duplicate()
 fn mark_yes_and_query_flow_status()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     assert!(!ft.is_td(&flow1));
     assert!(!ft.is_td(&flow2));
     assert!(!ft.is_td(&flow3));
@@ -428,7 +445,7 @@ fn mark_yes_and_query_flow_status()
     ft.mark_tapdance_flow(&flow2, flow2_seq);
     assert!(ft.is_td(&flow1));
     assert!(ft.is_td(&flow2));
-    ft.begin_tracking_flow(&flow3, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow3, test_default_syn());
     assert!(ft.tracking_at_all(&flow3));
 }
 
@@ -441,7 +458,7 @@ fn mark_yes_and_query_flow_status()
 // fn mark_yes_nonexistant_panics()
 // {
 //     let mut ft = FlowTracker::new();
-//     ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+//     ft.begin_tracking_flow(&flow1, test_default_syn());
 //     ft.mark_tapdance_flow(&flow2, flow2_seq);
 // }
 
@@ -451,8 +468,8 @@ fn drop()
     let mut ft = FlowTracker::new();
     ft.drop(&flow3);
     assert_eq!(0, ft.tracked_flows.len());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     assert_eq!(2, ft.tracked_flows.len());
     ft.drop(&flow1);
     assert_eq!(1, ft.tracked_flows.len());
@@ -476,14 +493,14 @@ fn drop_stale_flows_empty_no_panic()
 fn drop_stale_flows()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     sleep(time::Duration::from_millis(1000));
     ft.drop_stale_flows_and_RST_FINd();
     assert_eq!(2, ft.tracked_flows.len());
     ft.mark_tapdance_flow(&flow1, flow1_seq);
     sleep(time::Duration::from_millis(2000));
-    ft.begin_tracking_flow(&flow3, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow3, test_default_syn());
     assert_eq!(3, ft.tracked_flows.len());
     sleep(time::Duration::from_millis(5500));
     ft.drop_stale_flows_and_RST_FINd();
@@ -497,7 +514,7 @@ fn drop_stale_flows()
 fn drop_stale_does_not_drop_fin()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     ft.mark_tapdance_flow(&flow1, flow1_seq);
     sleep(time::Duration::from_millis(7500));
     ft.notice_fin(&flow1);
@@ -510,7 +527,7 @@ fn drop_stale_does_not_drop_fin()
 fn finishing_td_is_still_td()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     ft.mark_tapdance_flow(&flow1, flow1_seq);
     ft.notice_fin(&flow1);
     assert!(ft.is_td(&flow1));
@@ -530,7 +547,7 @@ fn finishing_td_is_still_td()
 fn rst_2_seconds_after_fin_VERY_IMPORTANT_MUST_PASS()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     ft.mark_tapdance_flow(&flow1, flow1_seq);
     ft.notice_fin(&flow1);
     assert!(ft.is_td(&flow1));
@@ -545,8 +562,8 @@ fn rst_2_seconds_after_fin_VERY_IMPORTANT_MUST_PASS()
 fn no_tapdance_no_rst_VERY_IMPORTANT_MUST_PASS()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
     ft.notice_fin(&flow1);
     sleep(time::Duration::from_millis(FIN_TIMEOUT_NS/1000000 + 50));
     ft.drop_stale_flows_and_RST_FINd();
@@ -556,12 +573,12 @@ fn no_tapdance_no_rst_VERY_IMPORTANT_MUST_PASS()
 fn mss_and_wscale_remembered()
 {
     let mut ft = FlowTracker::new();
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS { wscale: 7, mss: 1234 });
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert!(!ft.is_td(&flow1));
     assert!(ft.tracking_at_all(&flow1));
     let wscale_and_mss = ft.mark_tapdance_flow(&flow1, flow1_seq);
+    assert_eq!(65495, wscale_and_mss.mss);
     assert_eq!(7, wscale_and_mss.wscale);
-    assert_eq!(1234, wscale_and_mss.mss);
 }
 
 #[test]
@@ -571,10 +588,10 @@ fn count_tracked_flows_counts()
     assert_eq!(0, ft.count_tracked_flows());
     ft.drop(&flow3);
     assert_eq!(0, ft.count_tracked_flows());
-    ft.begin_tracking_flow(&flow1, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow1, test_default_syn());
     assert_eq!(1, ft.count_tracked_flows());
-    ft.begin_tracking_flow(&flow2, WscaleAndMSS::default());
-    ft.begin_tracking_flow(&flow3, WscaleAndMSS::default());
+    ft.begin_tracking_flow(&flow2, test_default_syn());
+    ft.begin_tracking_flow(&flow3, test_default_syn());
     assert_eq!(3, ft.count_tracked_flows());
     ft.drop(&flow1);
     assert_eq!(2, ft.count_tracked_flows());

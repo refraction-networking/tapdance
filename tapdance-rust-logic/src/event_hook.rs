@@ -52,13 +52,6 @@ impl EventHook
             }
         }
     }
-    // TODO there is no dropped(), maybe it was only in that proposal
-//     pub fn notify_dropped(&self)
-//     {
-//         if let Some(ref notifier) = self.mio_notifier.borrow() {
-//             let _ = notifier.set_readiness(Ready::dropped());
-//         }
-//     }
 }
 impl ::mio::Evented for EventHook
 {
