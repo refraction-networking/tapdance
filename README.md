@@ -102,3 +102,8 @@ and setup instructions as above, but:
 The gobbler remains the same. Running tapdance-prereqs.sh remains the same.
 n and c are the same as in the ZC version; -o is core id offset. (So, -o 3 -n 4
 would use cores 3,4,5,6).
+
+# Note
+
+This is the TapDance station code. You do not need this to be a user
+of TapDance; for that, you will need the [client](https://github.com/sergeyfrolov/gotapdance).
